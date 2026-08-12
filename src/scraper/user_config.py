@@ -90,6 +90,8 @@ MAX_RESULTS_PER_PROFILE = get("search.max_results_per_profile", 150)
 HYDRATION_CONCURRENCY = get("search.hydration_concurrency", 2)
 KEYWORD_GROUPS = get("search.keyword_groups", {})
 GEOS = get("search.geos", [])
+# {pool: [geo name, ...]} — geos this pool should NOT search. Optional.
+SKIP_GEOS = get("search.skip_geos", {})
 
 # ── targeting ────────────────────────────────────────────────────────────────
 NOW_CATEGORIES = get("targeting.now_categories", [
@@ -124,7 +126,21 @@ def build_search_urls():
     out = []
     for pool, words in KEYWORD_GROUPS.items():
         kw = "%28" + "+OR+".join(w.replace(" ", "+") for w in words) + "%29"
+        # Per-pool geo suppression. A pool whose stream is fully claimed by an
+        # earlier pool contributes ~nothing, and every extra pool widens the
+        # soft-block window for the WHOLE run. Measured over 10 runs on
+        # 2026-08-12 (see AGENTS.md, "Group C review"): the three Munich pools
+        # produced 2 unique jobs total, and C-cloud's five CITY pools produced 4
+        # (max FitScore 39.3) while its Germany pool carried every high scorer,
+        # including the corpus's single best match at 100.0.
+        #
+        # NOTE: suppressing a geo POOL does not suppress that geo's JOBS —
+        # Munich-located roles are ~20% of every run and arrive via other pools.
+        # `sourceGeo` is the pool's geo, never the job's location.
+        skip = {g.lower() for g in SKIP_GEOS.get(pool, [])}
         for geo in GEOS:
+            if geo["name"].lower() in skip:
+                continue
             # Parameter ORDER matches the hand-written list so a diff of the
             # rendered URLs is empty, not just equivalent.
             parts = ["f_WT=2"] if geo.get("remote_only") else []

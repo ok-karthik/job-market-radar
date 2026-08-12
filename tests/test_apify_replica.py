@@ -53,16 +53,19 @@ def test_bullet_point_injection():
 def test_target_profiles_include_group_c_cloud_pools():
     """
     F5: Group C (Cloud Engineer / Cloud Infrastructure Engineer / Kubernetes
-    Engineer / Kubernetes Administrator / DevSecOps) must be present as its
-    own 6-pool matrix (Germany-wide remote + the 5 cities), alongside the
-    existing 12 Group A/B pools, without altering A/B.
-    """
-    # 6 (A) + 6 (B) + 6 (C) = 18. Groups D and E were both tried and removed
-    # 2026-07-31 after a live A/B showed ~zero unique on-target yield.
-    assert len(TARGET_PROFILES) == 18
+    Engineer / Kubernetes Administrator / DevSecOps) must be present with at
+    least its Germany-wide pool, alongside Group A/B, without altering A/B.
 
+    Counts are deliberately NOT asserted: the geo matrix is config-driven, so a
+    hard 18 would fail on any clone with its own config.json, and it did fail
+    when the measured pool cut landed (2026-08-12, 18 -> 11). What must hold is
+    that all three groups are still REACHABLE and C-cloud keeps a pool.
+    """
     group_c_pools = [url for url in TARGET_PROFILES if _KW_CLOUD in url]
-    assert len(group_c_pools) == 6
+    # C-cloud's Germany pool carries every high scorer it has ever produced,
+    # including the corpus's single best match (FitScore 100.0). Its five CITY
+    # pools were cut on measured evidence; this one must never be.
+    assert len(group_c_pools) >= 1
 
     for term in ("Cloud+Engineer", "Cloud+Infrastructure+Engineer",
                  "Kubernetes+Engineer", "Kubernetes+Administrator", "DevSecOps"):
@@ -72,9 +75,17 @@ def test_target_profiles_include_group_c_cloud_pools():
     # too broad, would blow the 150 cap on low-signal rows).
     assert "Kubernetes%29" not in _KW_CLOUD and "+Kubernetes+OR" not in _KW_CLOUD
 
-    expected_geo_ids = {"101282230", "106967730", "101356337", "100477049", "106430557", "105347383"}
-    for geo_id in expected_geo_ids:
-        assert any(f"geoId={geo_id}" in url for url in group_c_pools)
+    # Germany-wide (remote) is the pool that matters for C-cloud — see above.
+    assert any("geoId=101282230" in url for url in group_c_pools)
+
+    # Every CONFIGURED geo must be reachable by some pool. Derived from config
+    # rather than hardcoded: a geo suppressed for one group is a deliberate,
+    # measured choice, but a geo listed and reachable by NO pool is dead config.
+    # (Munich was removed from the geo list entirely on 2026-08-12 rather than
+    # skipped in all three groups — same result, but the config states it.)
+    from scraper.user_config import GEOS
+    for geo in GEOS:
+        assert any(f"geoId={geo['geo_id']}" in url for url in TARGET_PROFILES), geo["name"]
 
 
 def test_get_with_retry_uses_full_jitter_backoff(mocker):
@@ -424,9 +435,11 @@ def test_source_pool_attribution_labels():
     from scraper.apify_replica import _pool_label
 
     labels = [_pool_label(u) for u in TARGET_PROFILES]
+    # The invariant is that EVERY profile resolves — an "unknown" label makes a
+    # pool invisible to the yield review. Per-group counts are config-driven
+    # (see the pool cut of 2026-08-12) and deliberately not pinned here.
     assert "unknown" not in labels
-    from collections import Counter
-    assert Counter(labels) == {"A-core": 6, "B-ai": 6, "C-cloud": 6}
+    assert set(labels) == {"A-core", "B-ai", "C-cloud"}
 
 
 def test_title_skip_reason_names_the_rule_that_fired():

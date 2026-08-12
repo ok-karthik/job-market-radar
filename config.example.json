@@ -1,10 +1,10 @@
 {
   "_comment": [
     "Copy this file to config.json and fill in your own values.",
-    "config.json is gitignored \u2014 it holds your CV URL, your Notion page and your",
+    "config.json is gitignored — it holds your CV URL, your Notion page and your",
     "search parameters, none of which belong in a shared repository.",
     "Every key here has a safe default in src/scraper/user_config.py, so the",
-    "pipeline runs without a config.json \u2014 it just won't be pointed at you."
+    "pipeline runs without a config.json — it just won't be pointed at you."
   ],
   "profile": {
     "_comment": "Who the pipeline is scoring against, and where it writes.",
@@ -15,15 +15,15 @@
   },
   "search": {
     "_comment": [
-      "Keyword groups are UNQUOTED and use no NOT logic \u2014 deliberately.",
+      "Keyword groups are UNQUOTED and use no NOT logic — deliberately.",
       "Quotes drop compound titles ('Senior Platform Engineer (Kubernetes)') and",
       "LinkedIn's guest API breaks on NOT. Recall is maximised here; precision is",
       "handled downstream by filter_jobs.py and classify_role_family().",
-      "Each geo MUST be its own entry \u2014 comma-encoded multi-geoId params are",
+      "Each geo MUST be its own entry — comma-encoded multi-geoId params are",
       "silently ignored and fall back to a global result set."
     ],
     "time_range": "r86400",
-    "max_results_per_profile": 300,
+    "max_results_per_profile": 150,
     "hydration_concurrency": 2,
     "keyword_groups": {
       "A-core": [
@@ -86,12 +86,19 @@
         "geo_id": "105347383",
         "remote_only": false
       }
-    ]
+    ],
+    "skip_geos": {
+      "C-cloud": [
+        "Berlin",
+        "Frankfurt"
+      ]
+    },
+    "_comment_skip_geos": "Optional {pool: [geo name]} — geos this pool should NOT search. Use when an earlier pool already claims that geo's jobs; fewer pools means a shorter run and less soft-block exposure. Suppressing a geo POOL does not suppress that geo's JOBS."
   },
   "targeting": {
     "_comment": [
       "Which SemanticCategory values roll up into each career track, and how",
-      "proficient you already are (0.0-1.0) \u2014 used for the demand x gap ROI table."
+      "proficient you already are (0.0-1.0) — used for the demand x gap ROI table."
     ],
     "now_categories": [
       "Platform Engineering",
