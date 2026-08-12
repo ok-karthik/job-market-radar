@@ -26,6 +26,8 @@ Override the target page with ``NOTION_PAGE_ID``.
 """
 import argparse
 import glob
+import hashlib
+import json
 import os
 import random
 import re
@@ -96,8 +98,16 @@ JOBS_CAP = 60  # keep the Notion table (and one request) well under limits
 # Scrape days rendered as date sub-pages under "🎯 Jobs to Apply".
 JOBS_DAYS = int(os.environ.get("JOBS_DAYS", "7"))
 CV_PATH = os.path.join(SCRIPT_DIR, "../CV.pdf")
-PACE = 0.34  # ~3 req/s, Notion's soft limit
-DELETE_WORKERS = 4  # concurrent block deletes; api()'s 429 retry keeps this within Notion's limit
+# Notion documents "an average of three requests per second", but that is a
+# guideline with generous burst headroom, not a hard gate. Measured against this
+# workspace on 2026-08-12 (40 deletes, throwaway page, zero 429s at every rung):
+#     1 worker + PACE sleep  1.1 req/s   |   8 workers  5.3 req/s
+#     4 workers              3.1 req/s   |  16 workers  7.4 req/s
+# The old serial-delete-plus-sleep path therefore ran at 1.1 req/s while deletes
+# are 542 of the run's 641 calls — that alone was ~8 of the 10 minutes.
+PACE = 0.34         # retained for the paginated GET loop only
+DELETE_WORKERS = 12  # measured safe; api()'s Retry-After handler is the backstop
+
 
 # ML-research / post-training role signals. These roles score high on semantic
 # similarity (they share the CV's AI vocabulary) but demand skills that live
@@ -623,7 +633,7 @@ def jobs_index_blocks(by_date, threshold):
     return out
 
 
-def _publish_date_pages(client, jobs_page_id, by_date):
+def _publish_date_pages(client, jobs_page_id, by_date, cache=None):
     """Create/refresh one child page per scrape date under the Jobs page.
 
     Date pages are matched on a title PREFIX (the date) so the job count in the
@@ -642,7 +652,8 @@ def _publish_date_pages(client, jobs_page_id, by_date):
         title = f"{date} · {len(jobs)} jobs"
         blocks = jobs_date_page_blocks(date, JOBS_SCORE_THRESHOLD, jobs, score_col)
         try:
-            _id, how = upsert_subpage(client, jobs_page_id, existing.get(date), title, blocks)
+            _id, how = upsert_subpage(client, jobs_page_id, existing.get(date), title, blocks,
+                                      cache=cache, cache_key=f"date:{date}")
             print(f"      {title} {how}")
         except Exception as e:                            # noqa: BLE001
             print(f"      [!] {title} FAILED: {e}")
@@ -718,6 +729,29 @@ def get_all_children(client, block_id):
             return out
 
 
+def delete_blocks(client, ids, tolerate=False):
+    """Archive many blocks concurrently.
+
+    Deletes are independent of one another, so they fan out; api()'s 429
+    Retry-After handler is the throttle. `tolerate` swallows per-block failures —
+    used for the main page body, where aborting mid-delete is what emptied the
+    page on 2026-08-12. A read-timed-out DELETE is never retried (it may have
+    applied), so the block is either already gone or harmlessly orphaned.
+    """
+    def one(bid):
+        try:
+            api(client, "DELETE", f"/blocks/{bid}")
+        except RuntimeError as e:
+            if not tolerate:
+                raise
+            print(f"  [~] skipped a block delete: {str(e)[:80]}")
+    if not ids:
+        return 0
+    with ThreadPoolExecutor(max_workers=DELETE_WORKERS) as pool:
+        list(pool.map(one, ids))
+    return len(ids)
+
+
 def delete_all_children(client, block_id, keep_child_pages=False):
     """Clear a block's children.
 
@@ -730,13 +764,7 @@ def delete_all_children(client, block_id, keep_child_pages=False):
     kids = get_all_children(client, block_id)
     if keep_child_pages:
         kids = [b for b in kids if b["type"] != "child_page"]
-    if not kids:
-        return 0
-    # Deletes are independent, so fan them out instead of one-request-then-sleep;
-    # api()'s 429 retry (Retry-After) keeps aggregate throughput within Notion's limit.
-    with ThreadPoolExecutor(max_workers=DELETE_WORKERS) as pool:
-        list(pool.map(lambda b: api(client, "DELETE", f"/blocks/{b['id']}"), kids))
-    return len(kids)
+    return delete_blocks(client, [b["id"] for b in kids])
 
 
 def append_children(client, block_id, blocks):
@@ -753,8 +781,10 @@ def append_children(client, block_id, blocks):
         nonlocal chunk, used
         if not chunk:
             return
+        # No inter-append sleep: appends must stay ordered within a page so they
+        # are already serial, and api() handles 429 via Retry-After. The old
+        # unconditional PACE sleep cost ~30s a run for no measured benefit.
         api(client, "PATCH", f"/blocks/{block_id}/children", json={"children": chunk})
-        time.sleep(PACE)
         chunk, used = [], 0
     for b in blocks:
         cost = 1 + len(b.get(b["type"], {}).get("children", []) or [])
@@ -763,6 +793,42 @@ def append_children(client, block_id, blocks):
         chunk.append(b)
         used += cost
     _flush()
+
+
+# ── unchanged-content skip ────────────────────────────────────────────────────
+# Most of what this script rewrites every night is byte-identical to what is
+# already on the page: a date page for 2026-08-04 is derived from a CSV that will
+# never change again, yet it was deleted and re-appended on every run (~1,000
+# blocks for the 08-07 page alone). Fingerprint the rendered blocks, keep the
+# hashes in a local file, and skip the page entirely when they match.
+#
+# The cache entry is written ONLY after a successful append, so a run that dies
+# mid-write leaves the old (non-matching) hash and the next run repairs the page.
+# It cannot detect a hand-edit made in the Notion UI — pass --force for that.
+CACHE_PATH = os.path.join(SCRIPT_DIR, "../jobs_output/.notion_publish_cache.json")
+
+
+def load_cache(force=False):
+    if force:
+        return {}
+    try:
+        with open(CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:                                     # noqa: BLE001
+        return {}
+
+
+def save_cache(cache):
+    try:
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, sort_keys=True, indent=0)
+    except Exception as e:                                # noqa: BLE001
+        print(f"  [~] publish cache not written ({e}); next run will rewrite everything")
+
+
+def fingerprint(title, blocks):
+    payload = json.dumps([title, blocks], sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def create_subpage(client, parent_id, title, blocks):
@@ -780,20 +846,33 @@ def update_page_title(client, page_id, title):
         json={"properties": {"title": [{"type": "text", "text": {"content": title}}]}})
 
 
-def upsert_subpage(client, parent_id, existing_block, title, blocks, keep_child_pages=False):
+def upsert_subpage(client, parent_id, existing_block, title, blocks,
+                   keep_child_pages=False, cache=None, cache_key=None):
     """Refresh a sub-page IN PLACE if it already exists (a child_page block whose
     id IS the page id), else create it. Reusing the page keeps its URL stable and
     preserves UI-only settings the API can't set — full-width layout and any
     'Publish to web' link the user enabled — across re-runs.
+
+    When `cache`/`cache_key` are given and the rendered blocks fingerprint the
+    same as last run, the page is left completely untouched — no GET, no deletes,
+    no appends.
     """
+    fp = fingerprint(title, blocks) if cache is not None else None
     if existing_block is None:
-        return create_subpage(client, parent_id, title, blocks), "created"
-    pid = existing_block["id"]
-    if existing_block["child_page"]["title"] != title:
-        update_page_title(client, pid, title)
-    delete_all_children(client, pid, keep_child_pages)  # clear content, keep the page
-    append_children(client, pid, blocks)
-    return pid, "updated in place"
+        pid = create_subpage(client, parent_id, title, blocks)
+        how = "created"
+    else:
+        pid = existing_block["id"]
+        if cache is not None and cache.get(cache_key) == fp:
+            return pid, "unchanged, skipped"
+        if existing_block["child_page"]["title"] != title:
+            update_page_title(client, pid, title)
+        delete_all_children(client, pid, keep_child_pages)  # clear, keep the page
+        append_children(client, pid, blocks)
+        how = "updated in place"
+    if cache is not None:
+        cache[cache_key] = fp                              # only after a clean write
+    return pid, how
 
 
 # ── markdown endpoint (hybrid path, added 2026-08-12) ────────────────────────
@@ -1008,6 +1087,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
                     help="parse the markdown and report block counts; no API calls")
+    ap.add_argument("--force", action="store_true",
+                    help="ignore the unchanged-content cache and rewrite every page "
+                         "(use after hand-editing a page in the Notion UI)")
     args = ap.parse_args()
 
     lines = open(MARKDOWN_PATH, encoding="utf-8").readlines()
@@ -1066,6 +1148,7 @@ def main():
     # Granular timeouts: appending ~90 blocks legitimately takes longer than a
     # read, and a single flat 30s was tight enough to trip on a slow night.
     timeout = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
+    cache = load_cache(args.force)
     with httpx.Client(headers=headers, timeout=timeout) as client:
         print(f"Target page: {PAGE_ID}")
         children = get_all_children(client, PAGE_ID)
@@ -1086,18 +1169,15 @@ def main():
 
         # Replace only the body; the sub-page cards are preserved (they shift to
         # the top of the page and act as a persistent nav / page tree).
-        # Replace only the body; sub-page cards are preserved.
+        body_fp = fingerprint("__body__", body_blocks)
+        body_unchanged = cache.get("body") == body_fp
         body_kids = [b for b in children if b["id"] not in keep]
-        for b in body_kids:
-            try:
-                api(client, "DELETE", f"/blocks/{b['id']}")
-            except RuntimeError as e:
-                # A DELETE that timed out is NOT retried (it may have applied).
-                # Tolerate it: the block is either gone or will be orphaned, and
-                # aborting here is what emptied the page on 2026-08-12.
-                print(f"  [~] skipped a block delete: {str(e)[:80]}")
-            time.sleep(PACE)
-        print(f"  archived {len(body_kids)} body block(s); kept {len(keep)} sub-page(s)")
+        if body_unchanged:
+            print(f"  body unchanged, skipped {len(body_kids)} delete(s) + "
+                  f"{len(body_blocks)} block append; kept {len(keep)} sub-page(s)")
+        else:
+            delete_blocks(client, [b["id"] for b in body_kids], tolerate=True)
+            print(f"  archived {len(body_kids)} body block(s); kept {len(keep)} sub-page(s)")
 
         # Each sub-page write is isolated. The body is archived BEFORE this
         # point, so an exception escaping here leaves the main page EMPTY —
@@ -1121,10 +1201,13 @@ def main():
                 continue
             try:
                 _id, how = upsert_subpage(client, PAGE_ID, existing[key], title, blocks,
-                                          keep_child_pages=(key == "jobs"))
+                                          keep_child_pages=(key == "jobs"),
+                                          cache=cache, cache_key=key)
                 print(f"  '{title}' ({label}) {how}: {_id}")
                 if key == "jobs":
-                    _publish_date_pages(client, _id, by_date)
+                    # Date pages are cached individually — a historical date is
+                    # derived from a CSV that will never change again.
+                    _publish_date_pages(client, _id, by_date, cache=cache)
             except Exception as e:                      # noqa: BLE001
                 failures.append(title)
                 print(f"  [!] '{title}' FAILED: {e}")
@@ -1140,10 +1223,13 @@ def main():
         # destroy the three nav sub-pages plus every Jobs date page. So the main
         # page stays on the block builder. Only the analysis sub-page — which has
         # no children — takes the one-call markdown path.
-        append_children(client, PAGE_ID, body_blocks)
-        print(f"  wrote {len(body_blocks)} body block(s)")
+        if not body_unchanged:
+            append_children(client, PAGE_ID, body_blocks)
+            cache["body"] = body_fp                 # only after a clean write
+            print(f"  wrote {len(body_blocks)} body block(s)")
         if failures:
             print(f"  [!] {len(failures)} sub-page(s) failed: {', '.join(failures)}")
+    save_cache(cache)
     print("✅ Notion page updated (sub-pages preserved in place).")
 
 
