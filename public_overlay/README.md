@@ -22,9 +22,49 @@ A tag increments identically for *"Proficient in Go and Python is a MUST"* and *
 
 ## Pipeline
 
+```mermaid
+flowchart TD
+    A["🔎 Harvest · apify_replica.py<br/>search pools · 24h window"] --> B["title pre-filter<br/><i>runs BEFORE hydration — drops are permanent</i>"]
+    B --> C["hydrate job details"]
+    C --> D["🧹 Filter · filter_jobs.py<br/>language · contract · location"]
+    D --> E["🧠 Score · semantic_job_analyzer.py<br/>CV similarity · 17 categories · skills · salary"]
+    E --> F{"RoleFamily?"}
+    F -->|off-target| G["dropped"]
+    F -->|on-target / unclear| H["📊 ranked shortlist"]
+    H --> I["learning plan<br/>markdown"]
+    H --> J["skill-gap<br/>verdict"]
+    H --> K["Notion<br/>mirror"]
+
+    style A fill:#1f6feb,color:#fff
+    style D fill:#1f6feb,color:#fff
+    style E fill:#1f6feb,color:#fff
+    style G fill:#8b1a1a,color:#fff
+    style H fill:#1a7f37,color:#fff
 ```
-apify_replica.py  →  filter_jobs.py  →  semantic_job_analyzer.py  →  reporting
-   harvest+hydrate    drop off-target      score, categorise, tag       markdown + Notion
+
+**A typical night:** 591 raw postings → 199 survive filtering → 134 scored → **14 above the shortlist threshold**. Roughly two thirds are dropped for a hard German-language requirement or an out-of-scope location; a further ~40% of survivors are rejected as the wrong engineering discipline.
+
+## Layout
+
+```
+main.py                      # orchestrator
+config.example.json          # copy to config.json — CV URL, keywords, geos, caps
+
+src/scraper/
+  apify_replica.py           # ① harvest IDs → hydrate details
+  filter_jobs.py             # ② language / contract / location
+  semantic_job_analyzer.py   # ③ CV scoring, categories, RoleFamily, salary
+  user_config.py             # config.json → env var → default
+
+jobs_analytics/
+  update_learning_plan.py    # rewrites the marked plan sections
+  skill_gap_report.py        # read-only weekly verdict, no models
+  publish_to_notion.py       # markdown → Notion blocks
+  backfill_role_family.py    # re-classify the corpus without reloading models
+  market_insights.py         # all-time aggregate
+
+tests/                       # 294 tests
+.agents/AGENTS.md            # engineering rules, anti-patterns, regex traps
 ```
 
 Run it end to end:
@@ -46,7 +86,10 @@ uv run python jobs_analytics/skill_gap_report.py
 
 Two phases against the guest API: ID harvest, then detail hydration.
 
-- **18 search pools** — 3 keyword groups × 6 German geo targets. Each pool is a single `geoId`; comma-encoded multi-geo params make LinkedIn silently fall back to a global result set.
+- **Search pools are config-driven** — keyword groups × geo targets, declared in `config.json`. Each pool is a
+  single `geoId`; comma-encoded multi-geo params make LinkedIn silently fall back to a global result set.
+- **`skip_geos` lets one keyword group drop a geo another keeps.** Pools whose results are already claimed by an
+  earlier pool cost requests and yield nothing, and every extra pool widens the soft-block window for the whole run.
 - **Queries are deliberately unquoted.** Exact-match quoting drops compound titles like `Senior Platform Engineer (Kubernetes)`, and `NOT` clauses crash the endpoint. Recall is maximised here and precision is paid for downstream.
 - **Soft-block detection.** LinkedIn's dominant defence is not a 429 — it's an HTTP 200 replaying a cached page to a flagged IP. The scraper distinguishes that from genuine end-of-stream and aborts loudly rather than silently degrading every later pool.
 - **Title pre-filter** runs before hydration and logs every skip with the exact word that fired it. Anything dropped here is invisible to all later stages, so it is the one filter that logs exhaustively.
