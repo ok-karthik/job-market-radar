@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go vet ./*)",
+      "Bash(gofmt -l *)",
+      "Bash(helm template *)",
+      "Bash(helm search *)",
+      "Bash(helm show *)",
+      "Bash(terraform validate*)"
+    ]
+  }
+}

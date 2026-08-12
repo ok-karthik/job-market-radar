@@ -1,0 +1,128 @@
+{
+  "_comment": [
+    "Copy this file to config.json and fill in your own values.",
+    "config.json is gitignored \u2014 it holds your CV URL, your Notion page and your",
+    "search parameters, none of which belong in a shared repository.",
+    "Every key here has a safe default in src/scraper/user_config.py, so the",
+    "pipeline runs without a config.json \u2014 it just won't be pointed at you."
+  ],
+  "profile": {
+    "_comment": "Who the pipeline is scoring against, and where it writes.",
+    "cv_url": "https://docs.google.com/document/d/YOUR_DOC_ID/export?format=pdf",
+    "cv_local_path": "CV.pdf",
+    "plan_markdown": "Learning_Plan.md",
+    "notion_page_id": ""
+  },
+  "search": {
+    "_comment": [
+      "Keyword groups are UNQUOTED and use no NOT logic \u2014 deliberately.",
+      "Quotes drop compound titles ('Senior Platform Engineer (Kubernetes)') and",
+      "LinkedIn's guest API breaks on NOT. Recall is maximised here; precision is",
+      "handled downstream by filter_jobs.py and classify_role_family().",
+      "Each geo MUST be its own entry \u2014 comma-encoded multi-geoId params are",
+      "silently ignored and fall back to a global result set."
+    ],
+    "time_range": "r86400",
+    "max_results_per_profile": 300,
+    "hydration_concurrency": 2,
+    "keyword_groups": {
+      "A-core": [
+        "Platform Engineer",
+        "Platform Engineering",
+        "Site Reliability Engineer",
+        "SRE",
+        "DevOps",
+        "Infrastructure Engineer"
+      ],
+      "B-ai": [
+        "AI Infrastructure",
+        "AI Platform",
+        "AI Platform Engineer",
+        "MLOps",
+        "ML Platform",
+        "AI Engineer",
+        "AI Architect",
+        "AI Reliability",
+        "Agentic",
+        "AI Agent",
+        "GenAI Engineer"
+      ],
+      "C-cloud": [
+        "Cloud Engineer",
+        "Cloud Infrastructure Engineer",
+        "Kubernetes Engineer",
+        "Kubernetes Administrator",
+        "DevSecOps"
+      ]
+    },
+    "geos": [
+      {
+        "name": "Germany (remote)",
+        "geo_id": "101282230",
+        "remote_only": true
+      },
+      {
+        "name": "Berlin",
+        "geo_id": "106967730",
+        "remote_only": false
+      },
+      {
+        "name": "Munich",
+        "geo_id": "101356337",
+        "remote_only": false
+      },
+      {
+        "name": "Frankfurt",
+        "geo_id": "100477049",
+        "remote_only": false
+      },
+      {
+        "name": "Rhine-Ruhr",
+        "geo_id": "106430557",
+        "remote_only": false
+      },
+      {
+        "name": "Hamburg",
+        "geo_id": "105347383",
+        "remote_only": false
+      }
+    ]
+  },
+  "targeting": {
+    "_comment": [
+      "Which SemanticCategory values roll up into each career track, and how",
+      "proficient you already are (0.0-1.0) \u2014 used for the demand x gap ROI table."
+    ],
+    "now_categories": [
+      "Platform Engineering",
+      "Site Reliability Engineering (SRE)",
+      "DevOps Engineering",
+      "Cloud Engineering"
+    ],
+    "next_categories": [
+      "AI Infrastructure",
+      "MLOps",
+      "AI Solutions Architecture"
+    ],
+    "later_categories": [
+      "Staff / Principal Engineering",
+      "Solutions Architecture"
+    ],
+    "salary_floor_eur": 0,
+    "your_skills": {
+      "umbrella_k8s": 0.9,
+      "umbrella_iac": 0.9,
+      "umbrella_cicd": 0.9,
+      "umbrella_cloud": 0.7,
+      "umbrella_observability": 0.7,
+      "umbrella_python": 0.8,
+      "umbrella_go": 0.3
+    }
+  },
+  "shortlist": {
+    "_comment": "The 'Jobs to Apply' shortlist and its Notion sub-pages.",
+    "score_threshold": 70,
+    "cap": 60,
+    "days": 7
+  }
+}

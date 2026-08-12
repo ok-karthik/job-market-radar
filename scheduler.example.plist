@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{LABEL}}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>FORCE_COLOR</key>
+        <string>true</string>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <!-- Unattended run: on a CONFIRMED IP soft-block, save + still process
+             whatever was harvested and exit non-zero, instead of aborting with no
+             data. Grep the log for "CONFIRMED soft-block" / "DEGRADED" to spot it. -->
+        <key>SOFTBLOCK_MODE</key>
+        <string>continue</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>{{REPO_PATH}}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>echo "\n===========================================================\n 📅 RUN DATE: $(date +'%Y-%m-%d %H:%M:%S')\n============================================================\n"; sleep 20; /usr/bin/caffeinate -dimsu {{HOME}}/.local/bin/uv run python main.py; sleep 60; osascript -e 'tell application "Finder" to sleep'</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>00</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>00</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>00</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>00</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>00</integer><key>Weekday</key><integer>5</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>{{REPO_PATH}}/jobs_output/jobs_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{REPO_PATH}}/jobs_output/jobs_launchd_error.log</string>
+</dict>
+</plist>

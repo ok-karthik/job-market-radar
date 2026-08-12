@@ -1,0 +1,34 @@
+# Python-generated files
+__pycache__/
+.pytest_cache
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+jobs_output/**
+!jobs_output/*_semantic.csv
+
+# macOS
+.DS_Store
+
+# CV — downloaded fresh from Google Docs on every run, never committed
+CV.pdf
+
+.env
+jobs_analytics/.env
+# CV rewrites — contain personal contact details, never committed
+CV_*.txt
+CV_*.md
+
+# Personal config — CV URL, Notion page, search parameters
+
+# launchd agent — lives in ~/Library/LaunchAgents, never tracked
+
+# Personal content — plan, content strategy, scored job data
+
+# Personal context extracted from AGENTS.md
