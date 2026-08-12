@@ -24,16 +24,16 @@ A tag increments identically for *"Proficient in Go and Python is a MUST"* and *
 
 ```mermaid
 flowchart TD
-    A["🔎 Harvest · apify_replica.py<br/>search pools · 24h window"] --> B["title pre-filter<br/><i>runs BEFORE hydration — drops are permanent</i>"]
+    A["🔎 1 · apify_replica.py — harvest IDs"] --> B["title pre-filter — drops are permanent"]
     B --> C["hydrate job details"]
-    C --> D["🧹 Filter · filter_jobs.py<br/>language · contract · location"]
-    D --> E["🧠 Score · semantic_job_analyzer.py<br/>CV similarity · 17 categories · skills · salary"]
+    C --> D["🧹 2 · filter_jobs.py — language, contract, location"]
+    D --> E["🧠 3 · semantic_job_analyzer.py — score and classify"]
     E --> F{"RoleFamily?"}
-    F -->|off-target| G["dropped"]
-    F -->|on-target / unclear| H["📊 ranked shortlist"]
-    H --> I["learning plan<br/>markdown"]
-    H --> J["skill-gap<br/>verdict"]
-    H --> K["Notion<br/>mirror"]
+    F -->|"off-target"| G["dropped"]
+    F -->|"on-target / unclear"| H["📊 ranked shortlist"]
+    H --> I["update_learning_plan.py"]
+    H --> J["skill_gap_report.py"]
+    H --> K["publish_to_notion.py"]
 
     style A fill:#1f6feb,color:#fff
     style D fill:#1f6feb,color:#fff
