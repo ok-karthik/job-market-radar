@@ -25,10 +25,8 @@ jobs_analytics/.env
 CV_*.txt
 CV_*.md
 
-# Personal config — CV URL, Notion page, search parameters
-
-# launchd agent — lives in ~/Library/LaunchAgents, never tracked
-
-# Personal content — plan, content strategy, scored job data
-
-# Personal context extracted from AGENTS.md
+# NOTE: this repo is PRIVATE and deliberately tracks personal material —
+# config.json, PERSONAL_CONTEXT.md, the learning plan, TODO_POSTS.md and the
+# scored job CSVs. The public mirror is produced by sync_public.py, which
+# withholds them; it does NOT read this file. Adding a personal file here
+# hides it from the private repo without making the public one any safer.
